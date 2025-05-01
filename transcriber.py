@@ -8,18 +8,21 @@ from typing import Optional, Union
 import logging
 import platform
 from transformers.utils.hub import TRANSFORMERS_CACHE
+from audio_converter import AudioConverter
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class AudioTranscriber:
-    def __init__(self, model_name: str = "openai/whisper-large-v2"):
+    def __init__(self, model_name: str = "openai/whisper-large-v2", language: str = "en"):
         """
         Initialize the AudioTranscriber with a specific Whisper model.
         
         Args:
             model_name (str): Name of the Whisper model to use
+            language (str): Language code for transcription (default: "en" for English)
         """
         logger.info(f"Model cache directory: {TRANSFORMERS_CACHE}")
         
@@ -47,6 +50,10 @@ class AudioTranscriber:
         self.model.to(self.device)
         
         self.processor = AutoProcessor.from_pretrained(model_name)
+        self.processor.feature_extractor.return_attention_mask = True
+        
+        # Get decoder prompt IDs for the specified language and task
+        forced_decoder_ids = self.processor.get_decoder_prompt_ids(language=language, task="transcribe")
         
         # Create pipeline
         self.pipe = pipeline(
@@ -54,12 +61,16 @@ class AudioTranscriber:
             model=self.model,
             tokenizer=self.processor.tokenizer,
             feature_extractor=self.processor.feature_extractor,
-            max_new_tokens=448,
             chunk_length_s=30,
             batch_size=16,
             return_timestamps=True,
             torch_dtype=self.torch_dtype,
             device=self.device,
+            generate_kwargs={
+                "use_cache": True,
+                "no_repeat_ngram_size": 3,
+                "forced_decoder_ids": forced_decoder_ids
+            }
         )
     
     def transcribe_file(self, audio_path: Union[str, Path]) -> dict:
@@ -80,8 +91,18 @@ class AudioTranscriber:
             
             logger.info(f"Transcribing file: {audio_path}")
             
+            # Check if file needs conversion
+            converted_path = audio_path
+            if audio_path.suffix.lower() not in ['.wav', '.mp3', '.flac']:
+                logger.info(f"Converting {audio_path.suffix} file to MP3 format")
+                converted_path = AudioConverter.convert_to_mp3(audio_path)
+            
             # Transcribe
-            result = self.pipe(str(audio_path))
+            result = self.pipe(str(converted_path))
+            
+            # Clean up converted file if it was created
+            if converted_path != audio_path:
+                AudioConverter.cleanup_file(converted_path)
             
             return result
         except Exception as e:
@@ -95,11 +116,13 @@ def main():
     parser.add_argument("audio_file", help="Path to the audio file to transcribe")
     parser.add_argument("--model", default="openai/whisper-large-v2", 
                        help="Whisper model to use (default: openai/whisper-large-v2)")
+    parser.add_argument("--language", default="en",
+                       help="Language code for transcription (default: en)")
     
     args = parser.parse_args()
     
     try:
-        transcriber = AudioTranscriber(model_name=args.model)
+        transcriber = AudioTranscriber(model_name=args.model, language=args.language)
         result = transcriber.transcribe_file(args.audio_file)
         
         print("\nTranscription Result:")

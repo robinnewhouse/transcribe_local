@@ -3,4 +3,6 @@ torch>=2.0.0
 torchaudio>=2.0.0
 numpy>=1.24.0
 soundfile>=0.12.1
-tqdm>=4.65.0 
+tqdm>=4.65.0
+librosa>=0.10.1
+audioread>=3.0.1
