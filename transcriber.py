@@ -6,6 +6,8 @@ import numpy as np
 from pathlib import Path
 from typing import Optional, Union
 import logging
+import platform
+from transformers.utils.hub import TRANSFORMERS_CACHE
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -19,9 +21,19 @@ class AudioTranscriber:
         Args:
             model_name (str): Name of the Whisper model to use
         """
-        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        self.torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+        logger.info(f"Model cache directory: {TRANSFORMERS_CACHE}")
         
+        # Check for available devices
+        if torch.cuda.is_available():
+            self.device = "cuda:0"
+            self.torch_dtype = torch.float16
+        elif torch.backends.mps.is_available() and platform.processor() == "arm":
+            self.device = "mps"
+            self.torch_dtype = torch.float32
+        else:
+            self.device = "cpu"
+            self.torch_dtype = torch.float32
+
         logger.info(f"Using device: {self.device}")
         logger.info(f"Using dtype: {self.torch_dtype}")
         
@@ -42,7 +54,7 @@ class AudioTranscriber:
             model=self.model,
             tokenizer=self.processor.tokenizer,
             feature_extractor=self.processor.feature_extractor,
-            max_new_tokens=128,
+            max_new_tokens=448,
             chunk_length_s=30,
             batch_size=16,
             return_timestamps=True,
